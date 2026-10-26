@@ -111,7 +111,7 @@ OMP_WEB_PASSWORD_HASH='scrypt$15$8$1$…' ompweb
 `ompweb hash-password` 會從標準輸入（stdin）讀取密碼——絕不透過命令列引數傳遞——以確保密碼不會出現在 Shell 歷程記錄與 `ps` 行程輸出中。
 該雜湊採用帶有全新 16 位元組鹽值（salt）的 scrypt（N = 2^15, r = 8, p = 1），並以自我描述格式 `scrypt$<ln>$<r>$<p>$<salt>$<digest>` 輸出。任何讀取該雜湊的人皆無法直接拿來登入，且無法將其還原為原始密碼。
 
-對話工作階段並非直接以密碼雜湊簽章。首次啟動時會在 `~/.omp/agent/omp-web/web-auth-secret.json`（權限 `0600`）中建立隨機簽章金鑰，並與雜湊值混淆計算，因此變更密碼依然能將所有人登出，同時單憑儲存的雜湊值絕對無法偽造登入工作階段。
+對話工作階段並非直接以密碼雜湊簽章。首次啟動時會在 `PI_CODING_AGENT_DIR` 指定的代理目錄下（未設定時為 `~/.omp/agent`）建立 `omp-web/web-auth-secret.json`（權限 `0600`），並與雜湊值混淆計算，因此變更密碼依然能將所有人登出，同時單憑儲存的雜湊值絕對無法偽造登入工作階段。
 
 各項服務安裝程式（`ompweb systemd install`、`ompweb-launchd install`、Linux 系統匣以及 Windows 服務）在安裝時仍接受傳入 `OMP_WEB_PASSWORD`，並會在寫入設定檔前先行雜湊處理。設定檔中僅會儲存雜湊值。
 
@@ -157,7 +157,7 @@ OMP_WEB_PASSWORD=secret npx --yes @kahme247/ompweb@latest ompweb-launchd install
 
 `OMP_WEB_PASSWORD` 會在安裝時立即進行雜湊；plist 內只會儲存雜湊值，絕不包含密碼明文。若使用 `ompweb hash-password` 自行產生了雜湊，亦可直接傳入 `OMP_WEB_PASSWORD_HASH`。
 
-當繫結至非回呼（non-loopback）主機時，請務必啟用身分驗證（設定 `OMP_WEB_PASSWORD_HASH` 或同等存取控制），並透過受信任的反向代理或 VPN 使用 HTTPS。切勿將未經驗證的 Web UI 暴露在公開網路中，或在明文 HTTP 連線下傳送密碼與工作階段 Cookie。
+當繫結至非回呼（non-loopback）主機時，請務必設定 `OMP_WEB_PASSWORD_HASH`（反向代理或 VPN 僅提供額外防護），並透過受信任的反向代理或 VPN 使用 HTTPS。切勿將未經驗證的 Web UI 暴露在公開網路中，或在明文 HTTP 連線下傳送密碼與工作階段 Cookie。
 
 記錄檔位於 `~/Library/Logs/ompweb/ompweb.log`，plist 檔案存放於 `~/Library/LaunchAgents/com.kahme247.ompweb.plist`（權限 600；其中儲存的是密碼雜湊，而非密碼明文）。
 
