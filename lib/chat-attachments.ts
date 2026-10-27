@@ -791,6 +791,7 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
     const sBuf = await sFn();
     const sXml = new TextDecoder("utf-8").decode(sBuf);
     const rows: string[][] = [];
+    let rawCellBytes = 0;
     const rowRegex = /<row\b[^>]*\/>|<row\b[^>]*>[\s\S]*?<\/row>/g;
     let rMatch: RegExpExecArray | null;
     while ((rMatch = rowRegex.exec(sXml)) !== null) {
@@ -832,8 +833,8 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
         }
         const trimmed = val.trim();
         if (trimmed) {
-          projectedBytes += encoder.encode(trimmed).byteLength;
-          if (projectedBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+          rawCellBytes += encoder.encode(trimmed).byteLength;
+          if (projectedBytes + rawCellBytes > MAX_ATTACHED_TEXT_BYTES) return null;
         }
         cells.set(colNum, trimmed);
       }
@@ -863,11 +864,9 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
         // = rowContentBytes + maxCols * 3 + 2 (outer pipes/spaces) + 1 (\n)
         sheetBytes += rowContentBytes + maxCols * 3 + 3;
       }
-      // Section separator: "\n\n" between sections
-      sheetBytes += 2;
-      projectedBytes += sheetBytes;
-      if (projectedBytes > MAX_ATTACHED_TEXT_BYTES) return null;
-
+      const sectionSeparatorBytes = sections.length > 0 ? 2 : 0;
+      if (projectedBytes + sectionSeparatorBytes + sheetBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+      projectedBytes += sectionSeparatorBytes + sheetBytes;
       const formattedRows = rows.map((r) => {
         const padded = [...r];
         while (padded.length < maxCols) padded.push("");
