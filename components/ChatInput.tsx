@@ -51,7 +51,10 @@ import {
   composeMessageWithTextAttachments,
   describeTextAttachmentSkip,
   formatAttachmentBytes,
+  inferImageMimeType,
+  isImageAttachmentFile,
   MAX_ATTACHED_TEXT_FILES,
+  readAttachmentText,
   selectTextAttachments,
 } from "@/lib/chat-attachments";
 import {
@@ -569,7 +572,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       MAX_ATTACHED_IMAGES - attachedImagesRef.current.length - pendingImageCountRef.current,
     );
     const imageFiles = files
-      .filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHED_IMAGE_BYTES)
+      .filter((file) => isImageAttachmentFile(file) && file.size <= MAX_ATTACHED_IMAGE_BYTES)
       .slice(0, remaining);
     if (!imageFiles.length) {
       if (files.length > 0) {
@@ -595,7 +598,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 const result = reader.result as string;
                 // result is "data:<mime>;base64,<data>"
                 const base64 = result.split(",")[1];
-                const image = { data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) };
+                const image = { data: base64, mimeType: inferImageMimeType(file), previewUrl: URL.createObjectURL(file) };
                 created.push(image);
                 resolve(image);
               };
@@ -655,12 +658,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     pendingTextFileBytesRef.current += textFiles.reduce((total, file) => total + file.size, 0);
     try {
       const readFiles = await Promise.all(
-        textFiles.map(async (file): Promise<AttachedTextFile> => ({
-          name: file.name,
-          mimeType: file.type,
-          content: await file.text(),
-          size: file.size,
-        })),
+        textFiles.map(async (file): Promise<AttachedTextFile | null> => {
+          const content = await readAttachmentText(file);
+          if (content === null) return null;
+          return {
+            name: file.name,
+            mimeType: file.type,
+            content,
+            size: file.size,
+          };
+        })
       );
       // The composer was cleared/sent while the reads were in flight —
       // drop the batch instead of re-appending stale attachments.
@@ -669,7 +676,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       // U+FFFD replacement characters left by mis-decoded binary (e.g.
       // UTF-16 text read as UTF-8).
       const newFiles = readFiles.filter(
-        (file) => !file.content.includes("\u0000") && !file.content.includes("\uFFFD"),
+        (file): file is AttachedTextFile => file !== null && !file.content.includes("\u0000") && !file.content.includes("\uFFFD"),
       );
       const skipped = textFiles.length - newFiles.length;
       setAttachedTextFiles((prev) => [
@@ -691,8 +698,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const processFiles = useCallback((files: File[]) => {
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    const otherFiles = files.filter((file) => !file.type.startsWith("image/"));
+    const imageFiles = files.filter((file) => isImageAttachmentFile(file));
+    const otherFiles = files.filter((file) => !isImageAttachmentFile(file));
     void processImageFiles(imageFiles);
     void processTextFiles(otherFiles);
   }, [processImageFiles, processTextFiles]);
