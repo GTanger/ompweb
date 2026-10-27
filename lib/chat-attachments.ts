@@ -921,6 +921,8 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
   const buf = await contentFn();
   const xml = new TextDecoder("utf-8").decode(buf);
 
+  const encoder = new TextEncoder();
+  let outputBytes = 0;
   const parts: string[] = [];
   const blockRegex = /<table:table[\s\S]*?<\/table:table>|<text:h\b[\s\S]*?<\/text:h>|<text:p\b[\s\S]*?<\/text:p>/g;
   let m: RegExpExecArray | null;
@@ -940,13 +942,31 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
           const body = tcMatch[3] ?? "";
           const text = decodeXmlEntities(body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
           const repeat = Math.min(Math.max(Number(/table:number-columns-repeated="(\d+)"/.exec(attrs)?.[1] ?? 1), 1), 64);
+          const escaped = text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+          if (escaped.length > 0) {
+            const cellBytes = encoder.encode(escaped).byteLength + 3;
+            outputBytes += repeat * cellBytes;
+            if (outputBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+          }
           for (let i = 0; i < repeat; i++) cells.push(text);
         }
         while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
-        if (cells.length > 0) rows.push(cells);
+        if (cells.length > 0) {
+          for (const c of cells) {
+            if (c === "") outputBytes += 3;
+          }
+          outputBytes += 2;
+          if (outputBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+          rows.push(cells);
+        }
       }
       if (rows.length > 0) {
         const maxCols = Math.max(...rows.map((r) => r.length));
+        outputBytes += 2 + maxCols * 6;
+        for (const r of rows) {
+          outputBytes += (maxCols - r.length) * 3;
+        }
+        if (outputBytes > MAX_ATTACHED_TEXT_BYTES) return null;
         const formattedRows = rows.map((r) => {
           const padded = [...r];
           while (padded.length < maxCols) padded.push("");
@@ -958,7 +978,12 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
       }
     } else {
       const text = block.replace(/<[^>]+>/g, "").trim();
-      if (text) parts.push(decodeXmlEntities(text));
+      if (text) {
+        const decoded = decodeXmlEntities(text);
+        outputBytes += encoder.encode(decoded).byteLength + 2;
+        if (outputBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+        parts.push(decoded);
+      }
     }
   }
   const res = parts.join("\n\n").trim();
