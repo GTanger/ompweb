@@ -29,6 +29,7 @@ export interface AttachedTextFileData {
   size: number;
 }
 
+/** Extracts lowercased file extension without leading dot. */
 function getFileExtension(name: string): string {
   return name.toLowerCase().replace(/\\/g, "/").split("/").pop()?.split(".").pop() ?? "";
 }
@@ -99,6 +100,7 @@ export function describeTextAttachmentSkip(
   return null;
 }
 
+/** Checks whether file is candidate for text attachment by MIME type or extension. */
 export function isTextAttachmentFile(file: Pick<File, "name" | "type">): boolean {
   return file.type === "text/plain"
     || file.type === "text/markdown"
@@ -129,6 +131,7 @@ const RASTER_IMAGE_EXTENSIONS: Record<string, string> = {
   ico: "image/x-icon",
 };
 
+/** Checks whether file is candidate for image attachment by MIME type or extension. */
 export function isImageAttachmentFile(file: Pick<File, "name" | "type">): boolean {
   if (file.type && file.type.startsWith("image/")) {
     return true;
@@ -140,6 +143,7 @@ export function isImageAttachmentFile(file: Pick<File, "name" | "type">): boolea
   return false;
 }
 
+/** Determines MIME type for image file from type property or extension fallback. */
 export function inferImageMimeType(file: Pick<File, "name" | "type">): string {
   if (file.type && file.type.startsWith("image/")) {
     return file.type;
@@ -148,12 +152,14 @@ export function inferImageMimeType(file: Pick<File, "name" | "type">): string {
   return RASTER_IMAGE_EXTENSIONS[ext] || file.type || "application/octet-stream";
 }
 
+/** Maps file extension to composer markdown language identifier. */
 function languageForFile(name: string): string {
   const extension = getFileExtension(name);
   if (MARKDOWN_EXTENSIONS[extension]) return "markdown";
   return "text";
 }
 
+/** Computes markdown code fence backtick count that safely encloses content. */
 function fenceForContent(content: string): string {
   const longestRun = content.match(/`+/g)?.reduce((longest, run) => Math.max(longest, run.length), 0) ?? 0;
   return "`".repeat(Math.max(3, longestRun + 1));
@@ -172,15 +178,23 @@ export function composeMessageWithTextAttachments(
   return [message.trim(), ...blocks].filter(Boolean).join("\n\n");
 }
 
-function decodeXmlEntities(str: string): string {
-  return str
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+/** Decodes XML named and numeric character entities in a single pass. */
+export function decodeXmlEntities(str: string): string {
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: "\u00a0",
+  };
+  return str.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));/g, (whole, dec, hex, name) => {
+    if (name) return named[name] ?? whole;
+    const cp = dec ? parseInt(dec, 10) : parseInt(hex, 16);
+    return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
+      ? String.fromCodePoint(cp)
+      : whole;
+  });
 }
 
 const MAX_DECOMPRESSED_BYTES = MAX_TOTAL_ATTACHED_TEXT_BYTES * 4;
@@ -191,6 +205,7 @@ interface DecompressBudget {
   remaining: number;
 }
 
+/** Decompresses deflate data stream while enforcing byte budget. */
 async function decompressDeflate(
   data: Uint8Array,
   format: "deflate" | "deflate-raw",
@@ -224,6 +239,7 @@ async function decompressDeflate(
   return res;
 }
 
+/** Attempts deflate or deflate-raw decompression within budget. */
 async function tryDecompress(data: Uint8Array, budget: DecompressBudget): Promise<Uint8Array | null> {
   if (data.length === 0) return new Uint8Array(0);
   if (budget.remaining <= 0) return null;
@@ -250,6 +266,7 @@ interface PdfCMap {
   codeBytes: 1 | 2;
 }
 
+/** Converts CMap hex destination sequence into a UTF-16 string. */
 function decodeCMapTargetHex(hex: string): string {
   const clean = hex.replace(/\s+/g, "");
   if (clean.length === 2) {
@@ -272,6 +289,7 @@ function decodeCMapTargetHex(hex: string): string {
   return out;
 }
 
+/** Parses a PDF ToUnicode CMap stream into a character mapping table. */
 function parseCMap(cmapStr: string, cmapBudget: DecompressBudget): PdfCMap {
   const map = new Map<number, string>();
   let codeBytes: 1 | 2 = 1;
@@ -328,6 +346,7 @@ function parseCMap(cmapStr: string, cmapBudget: DecompressBudget): PdfCMap {
   return { map, codeBytes };
 }
 
+/** Decodes PDF literal string escape sequences into raw byte values. */
 function decodePdfLiteralBytes(str: string): Uint8Array {
   const bytes: number[] = [];
   for (let i = 0; i < str.length; i++) {
@@ -361,6 +380,7 @@ function decodePdfLiteralBytes(str: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
+/** Decodes PDF hex string into raw byte array. */
 function decodePdfHexBytes(hexStr: string): Uint8Array {
   const clean = hexStr.replace(/\s+/g, "");
   if (clean.length === 0) return new Uint8Array(0);
@@ -372,6 +392,7 @@ function decodePdfHexBytes(hexStr: string): Uint8Array {
   return out;
 }
 
+/** Maps decoded PDF bytes to text using font CMap or fallback encodings. */
 function decodeBytesWithPdfCMap(bytes: Uint8Array, cmap: PdfCMap | undefined): string {
   if (!cmap || cmap.map.size === 0) {
     if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
@@ -400,6 +421,7 @@ function decodeBytesWithPdfCMap(bytes: Uint8Array, cmap: PdfCMap | undefined): s
   return out;
 }
 
+/** Converts byte array to binary Latin-1 string in bounded chunks. */
 function bytesToBinaryString(bytes: Uint8Array): string {
   const CHUNK = 0x8000;
   let out = "";
@@ -409,6 +431,7 @@ function bytesToBinaryString(bytes: Uint8Array): string {
   return out;
 }
 
+/** Extracts text streams and character mappings from PDF file buffer. */
 async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
   const budget: DecompressBudget = { remaining: MAX_DECOMPRESSED_BYTES };
   const latin1 = bytesToBinaryString(new Uint8Array(buf));
@@ -549,7 +572,7 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
       btStartRe.lastIndex = etMatch.index + etMatch[0].length;
       const block = obj.streamText.slice(blockStart, etMatch.index);
       let chunk = "";
-      const tokenRe = /\/([A-Za-z0-9_.-]+)\s+[-+\d.]+\s+Tf|\((?:\\[\s\S]|[^\\()])*\)|<([0-9a-fA-F\s]+)>|\b(Td|TD|Tm|T\*)\b/g;
+      const tokenRe = /\/([A-Za-z0-9_.-]+)\s+[-+\d.]+\s+Tf|\((?:\\[\s\S]|[^\\()])*\)|<([0-9a-fA-F\s]+)>|(\b(?:Td|TD|Tm)\b|\bT\*|['"])/g;
       let tm: RegExpExecArray | null;
       while ((tm = tokenRe.exec(block)) !== null) {
         if (tm[1]) {
@@ -560,6 +583,8 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
         } else if (tm[2] !== undefined) {
           const bytes = decodePdfHexBytes(tm[2]);
           chunk += decodeBytesWithPdfCMap(bytes, resolveFontCMap(currentFont));
+        } else if (tm[3]) {
+          if (chunk && !chunk.endsWith("\n")) chunk += "\n";
         }
       }
       if (chunk.trim()) lines.push(chunk.trim());
@@ -570,6 +595,7 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
   return result.length > 0 && !result.includes("\uFFFD") ? result : null;
 }
 
+/** Parses ZIP central directory and returns lazy decompression loaders. */
 async function readZipEntries(buffer: ArrayBuffer): Promise<Map<string, () => Promise<Uint8Array>>> {
   const budget: DecompressBudget = { remaining: MAX_DECOMPRESSED_BYTES };
   const view = new DataView(buffer);
@@ -624,6 +650,7 @@ async function readZipEntries(buffer: ArrayBuffer): Promise<Map<string, () => Pr
   return entries;
 }
 
+/** Extracts plain text from DOCX run XML elements. */
 function extractDocxRuns(containerXml: string): string {
   const elemRegex = /<w:t(?:[\s>][\s\S]*?<\/w:t>|\/>)|<w:br\b[^>]*\/>|<w:tab\b[^>]*\/>/g;
   let text = "";
@@ -642,6 +669,7 @@ function extractDocxRuns(containerXml: string): string {
   return text;
 }
 
+/** Extracts paragraphs and tables from OOXML DOCX document entries. */
 async function extractDocx(entries: Map<string, () => Promise<Uint8Array>>): Promise<string | null> {
   const xmlNames = ["word/document.xml"];
   for (const name of entries.keys()) {
@@ -696,6 +724,7 @@ async function extractDocx(entries: Map<string, () => Promise<Uint8Array>>): Pro
   return res || null;
 }
 
+/** Extracts worksheets and shared strings from OOXML XLSX into Markdown tables. */
 async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Promise<string | null> {
   const sharedStrings: string[] = [];
   const ssFn = entries.get("xl/sharedStrings.xml");
@@ -727,7 +756,8 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
       const idMatch = m[1].match(/\bId="([^"]+)"/);
       const targetMatch = m[1].match(/\bTarget="([^"]+)"/);
       if (idMatch && targetMatch) {
-        relMap.set(idMatch[1], targetMatch[1].replace(/^\/?/, "xl/"));
+        const target = targetMatch[1];
+        relMap.set(idMatch[1], target.startsWith("/") ? target.slice(1) : (target.startsWith("xl/") ? target : `xl/${target}`));
       }
     }
   }
@@ -760,17 +790,17 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
     const sBuf = await sFn();
     const sXml = new TextDecoder("utf-8").decode(sBuf);
     const rows: string[][] = [];
-    const rowRegex = /<row\b[\s\S]*?<\/row>/g;
+    const rowRegex = /<row\b[^>]*\/>|<row\b[^>]*[^/]>[\s\S]*?<\/row>/g;
     let rMatch: RegExpExecArray | null;
     while ((rMatch = rowRegex.exec(sXml)) !== null) {
       const rowXml = rMatch[0];
       const cells = new Map<number, string>();
       let maxCol = 0;
-      const cRegex = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g;
+      const cRegex = /<c\b([^>]*?)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
       let cMatch: RegExpExecArray | null;
       while ((cMatch = cRegex.exec(rowXml)) !== null) {
-        const attrs = cMatch[1] || cMatch[3] || "";
-        const body = cMatch[2] || "";
+        const attrs = cMatch[1] ?? cMatch[2] ?? "";
+        const body = cMatch[3] || "";
         const rAttr = attrs.match(/\br="([A-Z]+)(\d+)"/);
         const tAttr = attrs.match(/\bt="([^"]+)"/);
         let colNum = cells.size + 1;
@@ -827,6 +857,7 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
   return res || null;
 }
 
+/** Extracts slide text and speaker notes from OOXML PPTX presentation entries. */
 async function extractPptx(entries: Map<string, () => Promise<Uint8Array>>): Promise<string | null> {
   const slideEntries: Array<{ num: number; name: string; isNote: boolean }> = [];
   for (const name of entries.keys()) {
@@ -883,6 +914,7 @@ async function extractPptx(entries: Map<string, () => Promise<Uint8Array>>): Pro
   return res || null;
 }
 
+/** Extracts paragraphs and tables from OpenDocument (ODT/ODS/ODP) content. */
 async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Promise<string | null> {
   const contentFn = entries.get("content.xml");
   if (!contentFn) return null;
@@ -901,11 +933,11 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
       while ((trMatch = trRegex.exec(block)) !== null) {
         const tr = trMatch[0];
         const cells: string[] = [];
-        const tcRegex = /<table:table-cell[\s\S]*?<\/table:table-cell>/g;
+        const tcRegex = /<table:(?:covered-)?table-cell\b[^>]*\/>|<table:(?:covered-)?table-cell\b[\s\S]*?<\/table:(?:covered-)?table-cell>/g;
         let tcMatch: RegExpExecArray | null;
         while ((tcMatch = tcRegex.exec(tr)) !== null) {
           const tc = tcMatch[0];
-          const text = tc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          const text = tc.endsWith("/>") ? "" : tc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
           cells.push(decodeXmlEntities(text));
         }
         if (cells.length > 0) rows.push(cells);
@@ -930,6 +962,7 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
   return res || null;
 }
 
+/** Extracts chapter text from EPUB archive spine in reading order. */
 async function extractEpub(entries: Map<string, () => Promise<Uint8Array>>): Promise<string | null> {
   let rootFile = "OEBPS/content.opf";
   const containerFn = entries.get("META-INF/container.xml");
@@ -977,21 +1010,15 @@ async function extractEpub(entries: Map<string, () => Promise<Uint8Array>>): Pro
     if (!fn) continue;
     const buf = await fn();
     const html = new TextDecoder("utf-8").decode(buf);
-    const text = html
+    const stripped = html
       .replace(/<style[\s\S]*?<\/style>/gi, "")
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/p>/gi, "\n\n")
       .replace(/<\/h[1-6]>/gi, "\n\n")
       .replace(/<\/div>/gi, "\n")
-      .replace(/<[^>]+>/g, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+      .replace(/<[^>]+>/g, "");
+    const text = decodeXmlEntities(stripped)
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -1002,6 +1029,7 @@ async function extractEpub(entries: Map<string, () => Promise<Uint8Array>>): Pro
   return res || null;
 }
 
+/** Extracts plain text from legacy Word 97-2003 OLE2 binary file buffer. */
 function extractDocText(buffer: ArrayBuffer): string | null {
   const view = new DataView(buffer);
   if (view.byteLength < 512) return null;
@@ -1209,6 +1237,7 @@ const DOCUMENT_ATTACHMENT_MIMES: Record<string, true> = {
   "application/epub+zip": true,
 };
 
+/** Reads and decodes text content from text files or supported document formats. */
 export async function readAttachmentText(file: {
   name: string;
   type?: string;
