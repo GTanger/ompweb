@@ -777,9 +777,10 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
       sheets.push({ name, target });
     }
   }
-
   const sections: string[] = [];
   const visitedSheets = new Set<string>();
+  const encoder = new TextEncoder();
+  let projectedBytes = 0;
   for (let i = 0; i < sheets.length; i++) {
     const { name, target } = sheets[i];
     const path = target || `xl/worksheets/sheet${i + 1}.xml`;
@@ -829,7 +830,12 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
           const vMatch = body.match(/<v>([\s\S]*?)<\/v>/);
           if (vMatch) val = decodeXmlEntities(vMatch[1]);
         }
-        cells.set(colNum, val.trim());
+        const trimmed = val.trim();
+        if (trimmed) {
+          projectedBytes += encoder.encode(trimmed).byteLength;
+          if (projectedBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+        }
+        cells.set(colNum, trimmed);
       }
       if (maxCol > 0) {
         const rowList: string[] = [];
@@ -842,6 +848,26 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
 
     if (rows.length > 0) {
       const maxCols = Math.max(...rows.map((r) => r.length));
+      // Heading: "### ${name}\n\n"
+      let sheetBytes = encoder.encode(`### ${name}\n\n`).byteLength;
+      // Separator row: "| --- | ... |" -> 2 + maxCols * 6 + 1 (\n)
+      sheetBytes += 2 + maxCols * 6 + 1;
+      // Format data rows and calculate byte size
+      for (const r of rows) {
+        let rowContentBytes = 0;
+        for (const c of r) {
+          const escaped = c.replace(/\|/g, "\\|").replace(/\n/g, " ");
+          rowContentBytes += encoder.encode(escaped).byteLength;
+        }
+        // "| " + joined + " |\n" -> 2 + rowContentBytes + (r.length - 1) * 3 + (maxCols - r.length) * 3 + 2 + 1
+        // = rowContentBytes + maxCols * 3 + 2 (outer pipes/spaces) + 1 (\n)
+        sheetBytes += rowContentBytes + maxCols * 3 + 3;
+      }
+      // Section separator: "\n\n" between sections
+      sheetBytes += 2;
+      projectedBytes += sheetBytes;
+      if (projectedBytes > MAX_ATTACHED_TEXT_BYTES) return null;
+
       const formattedRows = rows.map((r) => {
         const padded = [...r];
         while (padded.length < maxCols) padded.push("");

@@ -714,9 +714,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       const totalOverBudget = overBudget + extractedOverBudget;
 
       setAttachedTextFiles((prev) => {
-        const accepted = identityRevision !== attachmentIdentityRevisionRef.current
-          ? validTextFiles
-          : validTextFiles.slice(0, Math.max(0, MAX_ATTACHED_TEXT_FILES - prev.length));
+        if (identityRevision !== attachmentIdentityRevisionRef.current) {
+          return [...prev, ...validTextFiles];
+        }
+        let committedBytes = prev.reduce((total, file) => total + file.size, 0);
+        const accepted = validTextFiles
+          .filter((file) => {
+            if (committedBytes + file.size > MAX_TOTAL_ATTACHED_TEXT_BYTES) return false;
+            committedBytes += file.size;
+            return true;
+          })
+          .slice(0, Math.max(0, MAX_ATTACHED_TEXT_FILES - prev.length));
         return [...prev, ...accepted];
       });
 
