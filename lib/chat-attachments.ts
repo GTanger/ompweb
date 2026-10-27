@@ -790,7 +790,7 @@ async function extractXlsx(entries: Map<string, () => Promise<Uint8Array>>): Pro
     const sBuf = await sFn();
     const sXml = new TextDecoder("utf-8").decode(sBuf);
     const rows: string[][] = [];
-    const rowRegex = /<row\b[^>]*\/>|<row\b[^>]*[^/]>[\s\S]*?<\/row>/g;
+    const rowRegex = /<row\b[^>]*\/>|<row\b[^>]*>[\s\S]*?<\/row>/g;
     let rMatch: RegExpExecArray | null;
     while ((rMatch = rowRegex.exec(sXml)) !== null) {
       const rowXml = rMatch[0];
@@ -933,13 +933,16 @@ async function extractOdf(entries: Map<string, () => Promise<Uint8Array>>): Prom
       while ((trMatch = trRegex.exec(block)) !== null) {
         const tr = trMatch[0];
         const cells: string[] = [];
-        const tcRegex = /<table:(?:covered-)?table-cell\b[^>]*\/>|<table:(?:covered-)?table-cell\b[\s\S]*?<\/table:(?:covered-)?table-cell>/g;
+        const tcRegex = /<table:(?:covered-)?table-cell\b([^>]*?)\/>|<table:(?:covered-)?table-cell\b([^>]*)>([\s\S]*?)<\/table:(?:covered-)?table-cell>/g;
         let tcMatch: RegExpExecArray | null;
         while ((tcMatch = tcRegex.exec(tr)) !== null) {
-          const tc = tcMatch[0];
-          const text = tc.endsWith("/>") ? "" : tc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          cells.push(decodeXmlEntities(text));
+          const attrs = tcMatch[1] ?? tcMatch[2] ?? "";
+          const body = tcMatch[3] ?? "";
+          const text = decodeXmlEntities(body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+          const repeat = Math.min(Math.max(Number(/table:number-columns-repeated="(\d+)"/.exec(attrs)?.[1] ?? 1), 1), 64);
+          for (let i = 0; i < repeat; i++) cells.push(text);
         }
+        while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
         if (cells.length > 0) rows.push(cells);
       }
       if (rows.length > 0) {
