@@ -2503,9 +2503,7 @@ export async function resumeInterruptedSessions(): Promise<void> {
   }));
 }
 
-/** Look up the workspace-registered launch config; unregistered projects attach none.
- * Exported for the agent route's fast-path advisor gate, which must compare
- * against the same effective advisor value startRpcSession uses. */
+/** Look up the workspace-registered launch config; unregistered projects attach none. Exported so the agent route's fast-path gate can apply the same effective-advisor rule as startRpcSession. */
 export function launchConfigForCwd(cwd: string): ProjectLaunchConfig | undefined {
   let canonical = cwd;
   try { canonical = realpathSync(cwd); } catch {}
@@ -2664,7 +2662,10 @@ export async function startRpcSession(
   // omp >= 18.5 lets only one process own a session file; a second `--resume`
   // child would fork into a new nested session on its first write. Reuse the
   // live wrapper that already reports this file (e.g. after it moved files).
-  if (sessionFile && !existing) {
+  // A dead keyed wrapper must not skip this scan: it owns nothing anymore,
+  // and a live wrapper under another key may already own this file. Spawning
+  // a second --resume child would fork into a new nested session on first write.
+  if (sessionFile && (!existing || !existing.isAlive())) {
     for (const candidate of new Set(registry.values())) {
       if (candidate.isAlive() && candidate.sessionFile && samePath(candidate.sessionFile, sessionFile)) {
         registry.set(sessionId, candidate);

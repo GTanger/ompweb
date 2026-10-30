@@ -69,10 +69,10 @@ export async function POST(
     const noSpawn = Object.hasOwn(NO_SPAWN_REPLIES, body.type);
     const liveOnly = LIVE_SESSION_ONLY.has(body.type);
     if (existing?.isAlive()) {
-      // Same effective-advisor union startRpcSession uses: a workspace
-      // whose launch config forces --advisor comes back advisorSpawned
-      // even with the per-chat toggle off, so comparing against the raw
-      // toggle would destroy+respawn the idle child on every command.
+      // Apply the same effective-advisor rule as startRpcSession: a
+      // workspace-forced advisor child must not be compared against the raw
+      // per-chat toggle, or every toggle-off prompt would destroy+respawn an
+      // idle child for no change (the replacement spawns with the same flag).
       const effectiveAdvisor = advisor || launchConfigForCwd(existing.cwd)?.advisor === true;
       if (noSpawn || liveOnly || existing.advisorSpawned === effectiveAdvisor || existing.isRunning() || existing.isEditingHistory()) {
         const result = await existing.send(body);
