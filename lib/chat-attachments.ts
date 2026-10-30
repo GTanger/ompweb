@@ -621,11 +621,14 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
     const pageRuns: PdfTextRun[] = [];
     let activeRun: PdfTextRun | null = null;
 
-    const flushRun = () => {
+    const flushRun = (): number | null => {
       if (activeRun) {
+        const endX = activeRun.x + activeRun.width;
         if (activeRun.text) pageRuns.push(activeRun);
         activeRun = null;
+        return endX;
       }
+      return null;
     };
 
     const appendDecodedText = (decoded: string) => {
@@ -710,8 +713,7 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
           if (sz !== undefined && Number.isFinite(sz)) fontSize = Math.abs(sz) || 10;
         } else if (op === "Tm") {
           if (numStack.length >= 6) {
-            const prevDevX = activeRun ? activeRun.x + activeRun.width : null;
-            flushRun();
+            const prevDevX = flushRun();
             const [a, b, c, d, e, f] = numStack.slice(-6);
             tlmMat = [a, b, c, d, e, f];
             tmMat = [a, b, c, d, e, f];
@@ -724,8 +726,7 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
           if (numStack.length >= 2) {
             const [tx, ty] = numStack.slice(-2);
             if (op === "TD") leading = -ty;
-            const prevDevX = activeRun ? activeRun.x + activeRun.width : null;
-            flushRun();
+            const prevDevX = flushRun();
             tlmMat = mulMat([1, 0, 0, 1, tx, ty], tlmMat);
             tmMat = [...tlmMat] as Mat2D;
             const newDev = mulMat(tmMat, ctm);
