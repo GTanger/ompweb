@@ -557,40 +557,253 @@ async function extractPdfText(buf: ArrayBuffer): Promise<string | null> {
     return fallbackCMap;
   };
 
-  const lines: string[] = [];
-  for (const [, obj] of objects) {
-    if (!obj.streamText || !obj.streamText.includes("BT") || obj.streamText.includes("begincmap")) continue;
-    let currentFont: string | null = null;
-    const btStartRe = /\bBT\b/g;
-    const etRe = /\bET\b/g;
-    let bm: RegExpExecArray | null;
-    while ((bm = btStartRe.exec(obj.streamText)) !== null) {
-      const blockStart = bm.index + bm[0].length;
-      etRe.lastIndex = blockStart;
-      const etMatch = etRe.exec(obj.streamText);
-      if (!etMatch) break;
-      btStartRe.lastIndex = etMatch.index + etMatch[0].length;
-      const block = obj.streamText.slice(blockStart, etMatch.index);
-      let chunk = "";
-      const tokenRe = /\/([A-Za-z0-9_.-]+)\s+[-+\d.]+\s+Tf|\((?:\\[\s\S]|[^\\()])*\)|<([0-9a-fA-F\s]+)>|(\b(?:Td|TD|Tm)\b|\bT\*|['"])/g;
-      let tm: RegExpExecArray | null;
-      while ((tm = tokenRe.exec(block)) !== null) {
-        if (tm[1]) {
-          currentFont = tm[1];
-        } else if (tm[0].startsWith("(")) {
-          const bytes = decodePdfLiteralBytes(tm[0].slice(1, -1));
-          chunk += decodeBytesWithPdfCMap(bytes, resolveFontCMap(currentFont));
-        } else if (tm[2] !== undefined) {
-          const bytes = decodePdfHexBytes(tm[2]);
-          chunk += decodeBytesWithPdfCMap(bytes, resolveFontCMap(currentFont));
-        } else if (tm[3]) {
-          if (chunk && !chunk.endsWith("\n")) chunk += "\n";
-        }
-      }
-      if (chunk.trim()) lines.push(chunk.trim());
+  type Mat2D = [number, number, number, number, number, number];
+  const mulMat = (m1: Mat2D, m2: Mat2D): Mat2D => [
+    m1[0] * m2[0] + m1[1] * m2[2],
+    m1[0] * m2[1] + m1[1] * m2[3],
+    m1[2] * m2[0] + m1[3] * m2[2],
+    m1[2] * m2[1] + m1[3] * m2[3],
+    m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+    m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+  ];
+  const estimateTextAdvance = (
+    str: string,
+    fontSize: number,
+    charSpacing: number,
+    wordSpacing: number,
+    horizScale: number,
+  ): number => {
+    let adv = 0;
+    for (let i = 0; i < str.length; i++) {
+      const cp = str.codePointAt(i)!;
+      if (cp > 0xffff) i++;
+      const glyphW = cp >= 0x2e80 ? 1.0 : 0.52;
+      adv += (glyphW * fontSize + charSpacing + (cp === 0x20 ? wordSpacing : 0)) * horizScale;
     }
+    return adv;
+  };
+
+  interface PdfTextRun {
+    text: string;
+    x: number;
+    y: number;
+    width: number;
+    fontSize: number;
+    btId: number;
+    forcedSpace: boolean;
+    seq: number;
   }
 
+  const lines: string[] = [];
+  let globalSeq = 0;
+  let globalBtId = 0;
+  const streamTokenRe =
+    /\/([A-Za-z0-9_.-]+)|\((?:\\[\s\S]|[^\\()])*\)|<([0-9a-fA-F\s]+)>|(\[|\])|([-+]?(?:\d+\.?\d*|\.\d+))|(\b(?:BT|ET|Tf|Tm|Td|TD|TL|Tc|Tw|Tz|cm|q|Q|Tj|TJ)\b|\bT\*|['"])|\b([A-Za-z*]+)\b/g;
+
+  for (const [, obj] of objects) {
+    if (!obj.streamText || !obj.streamText.includes("BT") || obj.streamText.includes("begincmap")) continue;
+    let ctm: Mat2D = [1, 0, 0, 1, 0, 0];
+    const ctmStack: Mat2D[] = [];
+    let tmMat: Mat2D = [1, 0, 0, 1, 0, 0];
+    let tlmMat: Mat2D = [1, 0, 0, 1, 0, 0];
+    let currentFont: string | null = null;
+    let pendingName: string | null = null;
+    let fontSize = 10;
+    let leading = 0;
+    let charSpacing = 0;
+    let wordSpacing = 0;
+    let horizScale = 1;
+    let inText = false;
+    let inTjArray = false;
+    let currentBtId = 0;
+    let nextForcedSpace = false;
+    const numStack: number[] = [];
+    const pageRuns: PdfTextRun[] = [];
+    let activeRun: PdfTextRun | null = null;
+
+    const flushRun = () => {
+      if (activeRun) {
+        if (activeRun.text) pageRuns.push(activeRun);
+        activeRun = null;
+      }
+    };
+
+    const appendDecodedText = (decoded: string) => {
+      if (!decoded) return;
+      const dev = mulMat(tmMat, ctm);
+      const effFontSize = Math.max(4, fontSize * (Math.hypot(dev[0], dev[1]) || Math.hypot(dev[2], dev[3]) || 1));
+      const advText = estimateTextAdvance(decoded, fontSize, charSpacing, wordSpacing, horizScale);
+      const advDev = advText * (Math.hypot(dev[0], dev[1]) || 1);
+      if (!activeRun) {
+        activeRun = {
+          text: decoded,
+          x: dev[4],
+          y: dev[5],
+          width: advDev,
+          fontSize: effFontSize,
+          btId: currentBtId,
+          forcedSpace: nextForcedSpace,
+          seq: globalSeq++,
+        };
+        nextForcedSpace = false;
+      } else {
+        activeRun.text += decoded;
+        activeRun.width += advDev;
+      }
+      tmMat = mulMat([1, 0, 0, 1, advText, 0], tmMat);
+    };
+
+    streamTokenRe.lastIndex = 0;
+    let tok: RegExpExecArray | null;
+    while ((tok = streamTokenRe.exec(obj.streamText)) !== null) {
+      if (tok[1] !== undefined) {
+        pendingName = tok[1];
+      } else if (tok[0].startsWith("(")) {
+        if (inText) {
+          const bytes = decodePdfLiteralBytes(tok[0].slice(1, -1));
+          appendDecodedText(decodeBytesWithPdfCMap(bytes, resolveFontCMap(currentFont)));
+        }
+      } else if (tok[2] !== undefined) {
+        if (inText) {
+          const bytes = decodePdfHexBytes(tok[2]);
+          appendDecodedText(decodeBytesWithPdfCMap(bytes, resolveFontCMap(currentFont)));
+        }
+      } else if (tok[3] !== undefined) {
+        if (tok[3] === "[") {
+          inTjArray = true;
+          numStack.length = 0;
+        } else {
+          inTjArray = false;
+          numStack.length = 0;
+        }
+      } else if (tok[4] !== undefined) {
+        const num = parseFloat(tok[4]);
+        if (Number.isFinite(num)) {
+          if (inText && inTjArray) {
+            if (num <= -150) {
+              flushRun();
+              nextForcedSpace = true;
+            }
+            tmMat = mulMat([1, 0, 0, 1, (-num / 1000) * fontSize * horizScale, 0], tmMat);
+          } else {
+            numStack.push(num);
+            if (numStack.length > 6) numStack.shift();
+          }
+        }
+      } else if (tok[5] !== undefined) {
+        const op = tok[5];
+        if (op === "BT") {
+          flushRun();
+          inText = true;
+          inTjArray = false;
+          currentBtId = ++globalBtId;
+          nextForcedSpace = false;
+          tmMat = [1, 0, 0, 1, 0, 0];
+          tlmMat = [1, 0, 0, 1, 0, 0];
+        } else if (op === "ET") {
+          flushRun();
+          inText = false;
+          inTjArray = false;
+        } else if (op === "Tf") {
+          if (pendingName) currentFont = pendingName;
+          const sz = numStack.pop();
+          if (sz !== undefined && Number.isFinite(sz)) fontSize = Math.abs(sz) || 10;
+        } else if (op === "Tm") {
+          if (numStack.length >= 6) {
+            const prevDevX = activeRun ? activeRun.x + activeRun.width : null;
+            flushRun();
+            const [a, b, c, d, e, f] = numStack.slice(-6);
+            tlmMat = [a, b, c, d, e, f];
+            tmMat = [a, b, c, d, e, f];
+            const newDev = mulMat(tmMat, ctm);
+            if (prevDevX === null || Math.abs(newDev[4] - prevDevX) > Math.max(1.5, fontSize * 0.12)) {
+              nextForcedSpace = true;
+            }
+          }
+        } else if (op === "Td" || op === "TD") {
+          if (numStack.length >= 2) {
+            const [tx, ty] = numStack.slice(-2);
+            if (op === "TD") leading = -ty;
+            const prevDevX = activeRun ? activeRun.x + activeRun.width : null;
+            flushRun();
+            tlmMat = mulMat([1, 0, 0, 1, tx, ty], tlmMat);
+            tmMat = [...tlmMat] as Mat2D;
+            const newDev = mulMat(tmMat, ctm);
+            if (prevDevX === null || Math.abs(newDev[4] - prevDevX) > Math.max(1.5, fontSize * 0.12)) {
+              nextForcedSpace = true;
+            }
+          }
+        } else if (op === "T*" || op === "'" || op === '"') {
+          flushRun();
+          const dy = -(leading || fontSize * 1.2);
+          tlmMat = mulMat([1, 0, 0, 1, 0, dy], tlmMat);
+          tmMat = [...tlmMat] as Mat2D;
+          nextForcedSpace = false;
+        } else if (op === "TL") {
+          const tl = numStack.pop();
+          if (tl !== undefined) leading = tl;
+        } else if (op === "Tc") {
+          const tc = numStack.pop();
+          if (tc !== undefined) charSpacing = tc;
+        } else if (op === "Tw") {
+          const tw = numStack.pop();
+          if (tw !== undefined) wordSpacing = tw;
+        } else if (op === "Tz") {
+          const tz = numStack.pop();
+          if (tz !== undefined) horizScale = (tz || 100) / 100;
+        } else if (op === "cm") {
+          if (numStack.length >= 6) {
+            const [a, b, c, d, e, f] = numStack.slice(-6);
+            ctm = mulMat([a, b, c, d, e, f], ctm);
+          }
+        } else if (op === "q") {
+          ctmStack.push([...ctm] as Mat2D);
+        } else if (op === "Q") {
+          if (ctmStack.length > 0) ctm = ctmStack.pop()!;
+        }
+        numStack.length = 0;
+        pendingName = null;
+      } else if (tok[6] !== undefined) {
+        numStack.length = 0;
+        pendingName = null;
+      }
+    }
+    flushRun();
+
+    if (pageRuns.length > 0) {
+      pageRuns.sort((a, b) => b.y - a.y || a.x - b.x || a.seq - b.seq);
+      const rows: { y: number; fontSize: number; runs: PdfTextRun[] }[] = [];
+      for (const run of pageRuns) {
+        const lastRow = rows[rows.length - 1];
+        const tol = lastRow ? Math.max(2.5, Math.min(lastRow.fontSize, run.fontSize) * 0.45) : 0;
+        if (lastRow && Math.abs(run.y - lastRow.y) <= tol) {
+          lastRow.runs.push(run);
+        } else {
+          rows.push({ y: run.y, fontSize: run.fontSize, runs: [run] });
+        }
+      }
+      for (const row of rows) {
+        row.runs.sort((a, b) => a.x - b.x || a.seq - b.seq);
+        let rowText = "";
+        let prevRun: PdfTextRun | null = null;
+        for (const run of row.runs) {
+          if (!run.text) continue;
+          if (!prevRun) {
+            rowText = run.text;
+          } else {
+            const gap = run.x - (prevRun.x + prevRun.width);
+            const needSpace =
+              !rowText.endsWith(" ") &&
+              !run.text.startsWith(" ") &&
+              (run.btId !== prevRun.btId || run.forcedSpace || gap > Math.max(1.5, prevRun.fontSize * 0.15));
+            rowText += (needSpace ? " " : "") + run.text;
+          }
+          prevRun = run;
+        }
+        if (rowText.trim()) lines.push(rowText.trim());
+      }
+    }
+  }
   const result = lines.join("\n").replace(/\u0000/g, "").trim();
   return result.length > 0 && !result.includes("\uFFFD") ? result : null;
 }
