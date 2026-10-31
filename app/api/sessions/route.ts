@@ -27,7 +27,7 @@ function computeSessionsSig(sessions: SessionInfo[]): string {
   let sig = `${sessions.length}:`;
   for (let i = 0; i < sessions.length; i++) {
     const s = sessions[i];
-    sig += `${s.id},${s.modified},${s.messageCount},${s.name};`;
+    sig += `${JSON.stringify([s.id, s.path, s.cwd, s.modified, s.messageCount, s.name, s.firstMessage, s.lastMessageAt ?? null, s.projectRoot, s.worktreeBranch ?? null, s.parentSessionId ?? null])};`;
   }
   return sig;
 }
