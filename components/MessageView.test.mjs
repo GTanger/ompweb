@@ -974,7 +974,6 @@ test("user messages fork at their own entry and edit the prompt", async (t) => {
   view.unmount();
 });
 
-<<<<<<< HEAD
 test("user-bubble overflow toggle appears when a late-loading image pushes past the cap", (t) => {
   // Layout stub: the bubble fits its text at first; a loaded image grows
   // its scroll height past the 300px cap without resizing the capped box,
