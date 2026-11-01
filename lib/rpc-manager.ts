@@ -1542,7 +1542,7 @@ export class AgentSessionWrapper {
         } else if (event.type === "prompt_error") {
           finish(new Error(typeof event.errorMessage === "string" ? event.errorMessage : "Target session turn failed."));
         }
-      }, { internal: true });
+      });
       const finish = (error: Error | null) => {
         if (done) return;
         done = true;
@@ -2685,7 +2685,7 @@ export function syncInterruptibleSessions(): void {
   const registry = getRegistry();
   const running = new Map<string, InterruptibleSession>();
   for (const session of registry.values()) {
-    if (session.sessionId && session.isRunning()) running.set(session.sessionId, { id: session.sessionId, advisor: session.advisorSpawned, hostId: session.host?.id ?? localHost.id });
+    if (session.sessionId && session.isRunning()) running.set(session.sessionId, { id: session.sessionId, advisor: session.advisorSpawned, hostId: session.host?.id ?? LOCAL_HOST_ID });
   }
   recordRunningSessions([...running.values()], (id) => registry.get(id)?.isAlive() === true);
 }
