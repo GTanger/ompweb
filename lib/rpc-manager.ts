@@ -201,7 +201,7 @@ const UNSUPPORTED_COMMANDS: Record<string, string> = {
   extension_ui_input: "Extension custom UI is not supported over the omp RPC protocol",
 };
 
-export { buildSessionSpawnArgs, launchConfigForCwd } from "./hosts/local-host";
+export { launchConfigForCwd } from "./project-registry";
 function toImageContents(value: unknown): Array<{ type: "image"; data: string; mimeType: string }> | undefined {
   const images = value as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
   return images?.length ? images : undefined;

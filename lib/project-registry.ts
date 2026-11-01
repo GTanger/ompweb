@@ -321,3 +321,15 @@ export function validateProjectPath(cwd: string): string {
   }
   return normalized;
 }
+
+/** Look up the workspace-registered launch config; unregistered projects attach none. */
+export function launchConfigForCwd(cwd: string): ProjectLaunchConfig | undefined {
+  let canonical = cwd;
+  try { canonical = realpathSync(cwd); } catch {}
+  const key = comparableProjectPath(canonical);
+  return loadProjectRegistry().projects.find((project) => {
+    if (project.hidden) return false;
+    const projectKey = comparableProjectPath(project.path);
+    return projectKey === key || key.startsWith(`${projectKey}-worktrees/`);
+  })?.launchConfig;
+}
