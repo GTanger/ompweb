@@ -1037,7 +1037,7 @@ for (const holdUpload of [false, true]) {
 }
 
 test("drops candidates expanding beyond per-file and aggregate limits post-read", async () => {
-  const { MAX_ATTACHED_TEXT_BYTES, MAX_TOTAL_ATTACHED_TEXT_BYTES } = await jiti.import("@/lib/chat-attachments");
+  const { MAX_ATTACHED_TEXT_BYTES, MAX_TOTAL_ATTACHED_TEXT_BYTES } = await import("@/lib/chat-attachments");
   const ref = React.createRef();
   render(React.createElement(ChatInput, {
     ref,
