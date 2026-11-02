@@ -73,5 +73,5 @@ export function setWordCompletionMode(mode: WordCompletionMode): void {
  */
 export function isWordCompletionEnabled(mode: WordCompletionMode = getWordCompletionMode()): boolean {
   if (mode !== "auto") return mode === "on";
-  return typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: fine)").matches;
 }
