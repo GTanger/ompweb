@@ -1020,7 +1020,6 @@ test("user-bubble overflow toggle appears when a late-loading image pushes past 
   fireEvent.load(img);
   assert.ok(view.getByRole("button", { name: "Show full input" }), "image load must re-measure overflow and reveal the toggle");
 });
-
 test("SafeMarkdownBody is wrapped in React.memo", () => {
   assert.equal(typeof SafeMarkdownBody, "object");
   assert.ok(SafeMarkdownBody.$$typeof, "SafeMarkdownBody should have a React component symbol");
@@ -1064,6 +1063,7 @@ test("haveSameRelevantToolResults supports tool_use and tool_call block formats"
 
   assert.equal(haveSameRelevantToolResults(msg, map1, map2), true);
   assert.equal(haveSameRelevantToolResults(msg, map1, map3), false);
+});
 test("user-message Edit only runs after confirmation, and not once blocked", async (t) => {
   const originalMatchMedia = window.matchMedia;
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });

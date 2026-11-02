@@ -104,6 +104,7 @@ export async function GET(req: Request) {
     const body = { sessions, runningSessionIds, runningSessions };
     const bodyJson = JSON.stringify(body);
     const etag = `"${createHash("sha1").update(bodyJson).digest("hex").slice(0, 16)}"`;
+
     cache.sessionsRef = sessions;
     cache.sessionsSig = computeSessionsSig(sessions);
     cache.runningSig = runningSig;
