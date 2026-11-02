@@ -323,7 +323,8 @@ export function validateProjectPath(cwd: string): string {
 }
 
 /** Look up the workspace-registered launch config; unregistered projects attach none. */
-export function launchConfigForCwd(cwd: string): ProjectLaunchConfig | undefined {
+export function launchConfigForCwd(cwd: string | undefined): ProjectLaunchConfig | undefined {
+  if (!cwd) return undefined;
   let canonical = cwd;
   try { canonical = realpathSync(cwd); } catch {}
   const key = comparableProjectPath(canonical);
