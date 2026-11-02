@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
 import React, { act } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react/pure.js";
-import { createJiti } from "jiti";
-
-const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true });
-const { ChatInput } = await jiti.import("./ChatInput.tsx");
-const { clearDraft, getDraft } = await jiti.import("@/lib/draft-store");
+const { ChatInput } = await import("./ChatInput.tsx");
+const { clearDraft, getDraft } = await import("@/lib/draft-store");
 
 const KEY = "hunt-silent-drop";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";

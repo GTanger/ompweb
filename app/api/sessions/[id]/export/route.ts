@@ -2,8 +2,6 @@ import { apiErrorResponse, opErrorResponse, resolveSessionHostOr404 } from "@/li
 import { getContentDisposition } from "@/lib/content-disposition";
 
 
-export const runtime = "nodejs";
-
 /** Render a session to self-contained HTML with the omp binary on its host (`omp --export`). */
 export async function GET(
   _req: Request,

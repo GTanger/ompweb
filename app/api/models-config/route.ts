@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-utils";
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { disposeUtilityRpc } from "@/lib/omp/rpc-utility";
@@ -12,14 +11,12 @@ import {
   type ModelsFileConfig,
 } from "@/lib/omp/models-config";
 
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   const file = readModelsConfigFile();
   if (file.parseError) {
     // The editor must show the failure instead of an empty form — an empty
     // form invites a Save that would wipe the user's real providers.
-    return NextResponse.json({
+    return Response.json({
       providers: {},
       parseError: file.parseError,
       path: file.path,
@@ -28,7 +25,7 @@ export async function GET() {
   }
   // Never emit a real key: the file API denies models.yml outright, and
   // this route is the scoped alternative to that denial.
-  return NextResponse.json(maskModelsConfigApiKeys(file.config));
+  return Response.json(maskModelsConfigApiKeys(file.config));
 }
 
 // PUT /api/models-config[?overwrite=true]
@@ -45,13 +42,13 @@ export async function PUT(req: Request) {
     try {
       validateModelsConfig(restored);
     } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+      return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
     }
     try {
       writeModelsConfig(restored, { overwriteUnparseable });
     } catch (error) {
       if (error instanceof ModelsConfigParseError) {
-        return NextResponse.json(
+        return Response.json(
           { error: `${error.message} — fix it by hand; omp-web will not overwrite it`, code: "models_config_unparseable" },
           { status: 409 },
         );
@@ -62,7 +59,7 @@ export async function PUT(req: Request) {
     // The utility process loads models.yml once at startup. A cache flush alone
     // would still query that stale registry after a provider was added.
     disposeUtilityRpc();
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     return apiErrorResponse(error);
   }
