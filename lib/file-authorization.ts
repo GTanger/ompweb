@@ -3,11 +3,9 @@ import { homedir } from "os";
 import path from "path";
 import {
   getAllowedFileRoots,
-  getConfigAgentRoots,
-  isConfigRootDeniedFile,
   isExistingFilePathAllowed,
   isFilePathAllowed,
-  isUnderConfigRoot,
+  isOmpSecretFile,
   isWindowsAbsolutePath,
   normalizeSlashes,
   resolveRequestedFilePath,
@@ -60,37 +58,18 @@ export async function authorizeFileAccess(
 ): Promise<FileAccessDecision> {
   const allowedRoots = await getAllowedFileRoots();
   const filePath = resolveReadFilePath(segments, allowedRoots);
-  // Making the omp config root readable (so `~/.agents/AGENTS.md` and
-  // `~/.omp/AGENTS.md` open in the viewer, #135) also puts omp's credential
-  // store inside an allowed root. Deny those by name before anything can
-  // stat, read or download them. Only paths outside the config roots are
-  // exempt, so a workspace that happens to hold an `agent.db` still opens.
-  //
-  // Resolve symlinks BEFORE the denied check: a workspace symlink named
-  // `link.db` pointing at `<agentDir>/agent.db` otherwise passes the
-  // lexical name check, and the config root it lands in is itself an
-  // allowed root, so every later check passes too. The check runs on both
-  // the lexical and the real path, and before the session-reference
-  // admission below (which skips the existing-path root check), so neither
-  // route can launder a denied file.
-  let realFilePath = filePath;
-  try {
-    realFilePath = normalizeSlashes(fs.realpathSync(filePath));
-  } catch {
-    // Nonexistent: keep the lexical path so the 404 below still fires.
-  }
-  const configRoots = getConfigAgentRoots();
-  const underConfigRoot =
-    isUnderConfigRoot(filePath, configRoots) || isUnderConfigRoot(realFilePath, configRoots);
-  if (underConfigRoot && (isConfigRootDeniedFile(filePath) || isConfigRootDeniedFile(realFilePath))) {
-    return ACCESS_DENIED;
-  }
+
   const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
   const allowedBySessionReference =
     !allowedByRoot &&
     allowSessionReference &&
     await isFilePathReferencedBySession(filePath, sessionId);
   if (!allowedByRoot && !allowedBySessionReference) return ACCESS_DENIED;
+  // Making the omp config root readable (so `~/.agents/AGENTS.md` and
+  // `~/.omp/AGENTS.md` open in the viewer, #135) also puts omp's credential
+  // store inside an allowed root. Deny it before anything can stat, read or
+  // download it, also through a symlink that resolves to it.
+  if (isOmpSecretFile(filePath)) return ACCESS_DENIED;
 
   let stat: fs.Stats;
   try {
@@ -102,7 +81,5 @@ export async function authorizeFileAccess(
   if (!allowedBySessionReference && !isExistingFilePathAllowed(filePath, allowedRoots)) {
     return ACCESS_DENIED;
   }
-  // Serve the resolved file, not the link: the caller must never observe a
-  // denied target through a differently-named path.
-  return { ok: true, filePath: realFilePath, stat };
+  return { ok: true, filePath, stat };
 }
