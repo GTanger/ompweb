@@ -767,14 +767,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         newImages.slice(accepted.length).forEach(revokeImagePreview);
         return [...prev, ...accepted];
       });
-      // Keep the skip notice when some files were dropped, mirroring the
-      // text-file path, which reports every dropped candidate. The zero-
-      // acceptance branch above keeps its own at-limit/skip wording.
-      if (skipped > 0) {
-        setAttachError(t("chatInput.attachmentImagesSkipped", { count: skipped, size: formatAttachmentBytes(MAX_ATTACHED_IMAGE_BYTES) }));
-      } else {
-        setAttachError(null);
-      }
+      setAttachError(null);
     } catch {
       // A failed read in the batch must not leak the siblings' blob URLs.
       created.forEach(revokeImagePreview);
