@@ -3139,7 +3139,8 @@ export function getRunningRpcSessions(): RunningRpcSession[] {
   for (const [sessionId, session] of getRegistry()) {
     if (session.isRunning()) {
       const id = session.sessionId || sessionId;
-      map.set(id, { id, cwd: session.cwd, ...(session.host.id === LOCAL_HOST_ID ? {} : { hostId: session.host.id }) });
+      const hostId = session.host?.id;
+      map.set(id, { id, cwd: session.cwd, ...(!hostId || hostId === LOCAL_HOST_ID ? {} : { hostId }) });
     }
   }
   return [...map.values()];
